@@ -236,7 +236,56 @@ def try_a1z26(x):
     if txt and is_printable(txt):
         candidates.append(("a1z26", txt))
 
+# 12) Rail Fence (zig-zag) decryption (look for mixed punctuation and spaces)
+def railfence_decrypt(ct: str, rails: int) -> str:
+    if rails < 2 or rails >= len(ct):
+        return ct
+    n = len(ct)
+    # pattern of rails indices across positions
+    pat = []
+    r, d = 0, 1
+    for _ in range(n):
+        pat.append(r)
+        r += d
+        if r == rails - 1 or r == 0:
+            d *= -1
+    # count chars per rail
+    counts = [pat.count(i) for i in range(rails)]
+    # slice ciphertext into rails in order
+    pos = 0
+    rails_slices = []
+    for c in counts:
+        rails_slices.append(ct[pos:pos + c])
+        pos += c
+    # reconstruct plaintext by following pattern
+    idx = [0] * rails
+    out = []
+    for rr in pat:
+        out.append(rails_slices[rr][idx[rr]])
+        idx[rr] += 1
+    return ''.join(out)
+
+def try_railfence(x, min_rails=2, max_rails=8):
+    # Light gate: enough letters, not just symbols Lower max for performance 
+    if len(x) < 8 or not re.search(r'[A-Za-z]', x):
+        return
+    # Strip clue tags like (AND)
+    t = re.sub(r'^\([A-Za-z0-9]+\)\s*', '', x.strip())
+    found = 0
+    for r in range(min_rails, max_rails + 1):
+        pt = railfence_decrypt(t, r)
+        # Heuristics: mostly printable, contains vowels, and several spaces/punctuation
+        if is_printable(pt) and re.search(r'[aeiouAEIOU]', pt) and re.search(r'[ \.\,\-\;:]', pt):
+            # avoid returning the identical string
+            if pt != x:
+                candidates.append((f"railfence r={r}", pt))
+                found += 1
+        if found >= 3:  # avoid flooding
+            break
+
+
 # Run detectors over variants
+
 for vname, vx in variants(s):
     before = len(candidates)
     try_hex(vx)
@@ -248,12 +297,14 @@ for vname, vx in variants(s):
     try_rot(vx)
     try_atbash(vx)
     try_morse(vx)
-    try_base58(vx)   # <-- add
-    try_a1z26(vx)   # <-- add
+    try_base58(vx)
+    try_a1z26(vx)
+    try_railfence(vx)  # <-- add here
     if len(candidates) > before:
         for i in range(before, len(candidates)):
             kind, txt = candidates[i]
             candidates[i] = (f"{kind} via {vname}", txt)
+
 
 # De-duplicate & print
 seen=set()
