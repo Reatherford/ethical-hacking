@@ -156,6 +156,86 @@ def rot47(t):
             out.append(ch)
     return ''.join(out)
 
+# 10) Base58 (Bitcoin-style alphabet, no checksum required)
+_B58_ALPH = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+_B58_IDX = {c:i for i,c in enumerate(_B58_ALPH)}
+
+def b58decode_to_bytes(t: str):
+    t = t.strip().replace(" ", "")
+    if not t or any(ch not in _B58_IDX for ch in t):
+        return None
+    # Count leading '1' (zero bytes)
+    n_zeros = len(t) - len(t.lstrip('1'))
+    num = 0
+    for ch in t:
+        num = num * 58 + _B58_IDX[ch]
+    # Convert integer to bytes
+    out = bytearray()
+    while num > 0:
+        num, rem = divmod(num, 256)
+        out.append(rem)
+    out = bytes([0])*n_zeros + bytes(reversed(out))
+    return out
+
+def try_base58(x):
+    t = x.strip()
+    if not t or any(ch not in _B58_IDX and not ch.isspace() for ch in t):
+        return
+    try:
+        raw = b58decode_to_bytes(t)
+        if raw is None:
+            return
+        # try text
+        txt = raw.decode(errors='ignore')
+        if is_printable(txt):
+            candidates.append(("base58", txt))
+        # also surface hex if looks byte-ish but not very printable
+        elif raw and len(raw) <= 64:
+            candidates.append(("base58->hex", raw.hex()))
+    except Exception:
+        pass
+
+# 11) A1Z26 (1->A ... 26->Z). 0 or 27 -> space
+def try_a1z26(x):
+    s = x.strip()
+    # Quick gate: must have mostly digits/separators
+    if not re.fullmatch(r'[0-9\s,/\-]+', s):
+        return
+    out = []
+    num = ""
+    def flush():
+        nonlocal num
+        if not num:
+            return
+        try:
+            v = int(num)
+        except ValueError:
+            v = -1
+        if v == 0 or v == 27:
+            out.append(' ')
+        elif 1 <= v <= 26:
+            out.append(chr(ord('A') + v - 1))
+        else:
+            out.append('?')
+        num = ""
+
+    for ch in s:
+        if ch.isdigit():
+            num += ch
+        else:
+            flush()
+            # treat slash or whitespace as word break
+            if ch in '/ ':
+                out.append(' ')
+            # commas/dashes are just separators (no extra space needed)
+
+    flush()
+    txt = ''.join(out)
+    # Normalize spaces
+    txt = re.sub(r'\s+', ' ', txt).strip()
+    if txt and is_printable(txt):
+        candidates.append(("a1z26", txt))
+
 # Run detectors over variants
 for vname, vx in variants(s):
     before = len(candidates)
@@ -168,9 +248,9 @@ for vname, vx in variants(s):
     try_rot(vx)
     try_atbash(vx)
     try_morse(vx)
-    # Tag findings with the transform used
+    try_base58(vx)   # <-- add
+    try_a1z26(vx)   # <-- add
     if len(candidates) > before:
-        # rename the last N findings to include variant
         for i in range(before, len(candidates)):
             kind, txt = candidates[i]
             candidates[i] = (f"{kind} via {vname}", txt)
